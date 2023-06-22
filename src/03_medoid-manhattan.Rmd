@@ -1,0 +1,319 @@
+---
+title: "K-Medoids"
+course: DANA 4840
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+Read Clean with outliers and all vars file
+
+```{r}
+#rm(list = ls())
+
+df <- read.csv("~/Documents/Data Science/Term 3/DANA 4840 - rebecca/project/data/cleandf_no_out.csv")
+#df <- df_no_out
+dim(df)
+colnames(df)
+df$dum_sat <- df$dum_satisfaction # assign new name
+colnames(df)
+ncol(df)
+df <- df[, -c(1, 23)] # drop X and dum_satisfaction
+colnames(df)
+ncol(df)
+```
+
+Undersample
+
+```{r}
+
+######################################
+# Undersample
+######################################
+library(dplyr)
+set.seed(4840)
+df_sample1k <- df %>% group_by(dum_sat) %>% sample_n(size=500)
+dim(df_sample1k)
+
+names(df_sample1k)
+```
+
+Confirm number of samples
+
+```{r}
+
+
+# count on each sat
+df_sample1k %>% count(dum_sat)
+
+```
+
+Bar Plot on Samples
+
+```{r}
+
+# barplot
+
+library(Hmisc)
+counts <- table(df_sample1k$dum_sat)
+barplot(counts, main="Cardio Distribution",
+        xlab="Cardio")
+
+```
+
+SCALE
+
+```{r}
+#colnames(df_sample1k)
+
+#############################
+# df_sample1k SCALING
+##############################
+target_col=ncol(df_sample1k)
+target_col
+X = df_sample1k[,-target_col]
+y = df_sample1k[,target_col]
+
+names(X)
+
+#scaled data
+X_ss1k = as.data.frame(scale(X))
+
+
+```
+
+#############################
+OPTIMAL NUMBER OF CLUSTERING
+#############################
+
+Elbow Method
+Elbow method is tricky.  However, before the point slows down, we can see cluster 2 or 3.
+
+```{r}
+library(cluster)
+library(factoextra)
+
+fviz_nbclust(X_ss1k, pam, method = "wss")+
+  theme_classic()
+
+```
+
+
+Silhouette
+It shows 2 optimal number of clusters
+
+
+```{r}
+
+
+# Silhouette
+fviz_nbclust(X_ss1k, pam, method = "silhouette")+
+  theme_classic()
+
+
+```
+```
+K-MEDOIDS
+Metric: Manhattan, Robust to outliers
+
+```{r}
+
+pam.res <- pam(X_ss1k, 2, metric="manhattan")
+print(pam.res)
+
+
+```
+
+FREQUENCIES OF 1 AND 2 CLUSTERS
+
+```{r}
+
+dd <- cbind(df_sample1k, cluster = pam.res$cluster)
+dd
+
+```
+
+Count on each cluster
+```{r}
+
+dd %>% count(cluster)
+
+```
+
+Prepare the bar plot
+
+```{r}
+
+counts <- table(dd$cluster)
+counts
+        
+```
+
+BAR PLOT for the frequencies of each cluster
+
+```{r}
+
+barplot(counts, main="Airline Clustering",
+        xlab="Cluster")
+
+```
+
+VISUALIZING THE CLUSTERS
+
+```{r}
+
+options(ggrepel.max.overlaps = -Inf)
+
+fviz_cluster(pam.res, 
+             palette = c("#00AFBB", "#FC4E07"), # color palette
+             ellipse.type = "t",                           # Concentration ellipse
+             repel = TRUE,                                 # Avoid label overplotting (slow)
+             ggtheme = theme_classic()
+)
+
+```
+
+CLUSTER VALIDATION
+Recall that the silhouette coefficient (Si) measures how similar an object i is to the
+the other objects in its own cluster versus those in the neighbor cluster. Si values
+range from 1 to - 1:
+
+- A value of Si close to 1 indicates that the object is well clustered. In the other
+words, the object i is similar to the other objects in its group.
+- A value of Si close to -1 indicates that the object is poorly clustered, and that
+assignment to some other cluster would probably improve the overall results.
+
+```{r}
+
+library(fpc)
+
+fviz_silhouette(pam.res, palette = "jco", 
+                ggtheme = theme_classic())
+                
+```
+
+
+
+
+```{r}
+
+silinfo <- pam.res$silinfo
+silinfo
+
+names(silinfo)
+
+```
+
+
+
+```{r}
+
+## # Average silhouette width of each cluster
+
+silinfo$clus.avg.widths
+
+## # The total average (mean of all individual silhouette widths)
+silinfo$avg.width
+
+
+```
+
+Confusion Matrix and Statistics
+
+```{r}
+
+dd <- cbind(df_sample1k, cluster = pam.res$cluster)
+dd
+unique(dd$dum_sat)
+actual <- dd$dum_sat
+unique(dd$cluster)
+pred <- dd$cluster
+pred
+pred = ifelse(pred==1,0,1)
+unique(pred)
+
+tabl <- table(pred, actual)
+caret::confusionMatrix(tabl, positive= "1")
+
+
+
+
+```
+
+DUNN INDEX
+
+The Dunn index is calculated as a ratio of the smallest inter-cluster distance to the largest intra-cluster distance. A high DI means better clustering since observations in each cluster are closer together, while clusters themselves are further away from each other.
+
+It appears that we have poor Dunn Index
+
+Source: https://python-bloggers.com/2022/03/dunn-index-for-k-means-clustering-evaluation
+
+
+```{r}
+# Statistics for k-means clustering
+
+library(fpc)
+
+pam_stats <- cluster.stats(dist(X_ss1k),  pam.res$cluster)
+
+# Dun index
+pam_stats$dunn
+
+```
+
+Rand Index
+
+The corrected **Rand index** provides a measure for assessing the similarity between two partitions, adjusted for chance. Its range is -1 (no agreement) to 1 (perfect agreement). Agreement between the specie types and the cluster solution is 0.62 using **Rand index** and 0.748 using Meila's VI.
+
+```{r}
+
+y_sample <- df_sample1k$dum_sat
+reference = ifelse(y_sample==0,1,2)
+
+
+clust_stats <- cluster.stats(d = dist(df_sample1k), 
+                             reference, pam.res$cluster)
+
+# Corrected Rand index
+clust_stats$corrected.rand
+
+
+```
+
+
+```{r}
+
+clust_stats$vi
+
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+

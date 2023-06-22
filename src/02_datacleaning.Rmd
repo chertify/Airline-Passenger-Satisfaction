@@ -1,0 +1,259 @@
+---
+title: "4840 data cleaning"
+author: "Rebecca"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+Data cleaning 
+Input : train.csv
+Outputs : 
+df            - cleaned data
+df_no_out     - cleaned data with no outliers (using boxplot method only) on the 2 Delay.in.Minutes columns
+X_scale       - scaled df without target variable (dum_satisfaction)
+X_scale_noout - scaled df_no_out without target variable (dum_satisfaction)
+y             - target feature column
+
+
+Cleaning done :
+A1 Remove X and id as they are unique identifiers, and extract personal travel records
+A2 Missing values of Arrival.Delay.in.Minutes => median for each satisfaction group
+A3 zero rating value = 'not applicable' - removed
+A4 generate int dummy for categorical data and drop the original columns
+
+Dummy variables for categorical features:
+==========================================
+[1] dum_Gender : "Female 0" "Male 1"  
+[1] dum_Customer : "disloyal Customer 0" "Loyal Customer 1"   
+[1] dum_Class : "Business 2" "Eco 0"      "Eco Plus 1"
+[1] dum_satisfaction : "neutral or dissatisfied 0" "satisfied 1"    
+
+
+
+# 1. Read the data into R:
+```{r}
+temp <- read.csv("~/GIT/MY_PROJECTS/KMedoid/data/train.csv")
+```
+
+# A1 Remove X and id as they are unique identifiers, and extract personal travel records
+```{r}
+raw_df<-temp[temp$Type.of.Travel=="Personal Travel",-c(1,2)]
+#drop type of travel
+raw_df<-raw_df[,-4]
+# View(raw_df)
+```
+
+32249 records
+
+```{r}
+df1=raw_df
+```
+
+
+# A2 - Missing values of Arrival.Delay.in.Minutes => median for each satisfaction group
+```{r}
+m1 <- median(df1[which(df1$satisfaction == "satisfied" & !is.na(df1$Arrival.Delay.in.Minutes)),]$Arrival.Delay.in.Minutes)
+m2 <- median(df1[which(df1$satisfaction != "satisfied" & !is.na(df1$Arrival.Delay.in.Minutes)),]$Arrival.Delay.in.Minutes)
+df1$Arrival.Delay.in.Minutes <- ifelse(is.na(df1$Arrival.Delay.in.Minutes)&df1$satisfaction=='satisfied', 
+                            m1, ifelse(is.na(df1$Arrival.Delay.in.Minutes)&df1$satisfaction!='satisfied', 
+                                             m2, df1$Arrival.Delay.in.Minutes))
+```
+
+
+# A3 - zero rating value = 'not applicable' - remove
+
+```{r}
+(all_col<-colnames(df1))
+```
+
+```{r}
+# check percentage of records with ratings = 0 for each feature
+n=nrow(df1)
+score_col=all_col[6:19]
+score_col_impute = c()   # record the columns that may need to be imputed later
+for (col in score_col) {
+  pc = 100* (nrow(df1[df1[col]==0,]) / n)
+  med = median(df1[,col])
+  if (pc > 0) { 
+    score_col_impute <- c(score_col_impute, col)
+    }
+  print(paste(col, pc, med))
+}
+
+
+```
+
+
+```{r}
+# columns to impute (values stored during eda)
+score_col_impute
+```
+
+```{r}
+for (col in score_col_impute) {
+  df1[,col] <- ifelse(df1[,col]==0 , NA, df1[,col])
+}
+
+```
+
+drop all na data
+```{r}
+df_nomiss <- na.omit(df1)
+```
+
+```{r}
+summary(df_nomiss)
+```
+
+29598 records left
+
+# A4 generate int dummy for categorical data
+
+[1] "Gender c(\"Male\", \"Female\")"
+[1] "Customer.Type c(\"Loyal Customer\", \"disloyal Customer\")"
+[1] "Class c(\"Eco Plus\", \"Eco\", \"Business\")"
+[1] "satisfaction c(\"neutral or dissatisfied\", \"satisfied\")"
+
+```{r}
+require(plyr)
+g = sort(unique(df_nomiss$Gender))
+order=c(0:(length(g)-1))
+print(paste(g, order))
+df_nomiss$dum_Gender <- mapvalues(df_nomiss$Gender, from=g, to=order)
+df_nomiss$dum_Gender <- as.integer(df_nomiss$dum_Gender)
+
+# 
+g = sort(unique(df_nomiss$Customer.Type))
+order=c(0:(length(g)-1))
+print(paste(g, order))
+df_nomiss$dum_Customer <- mapvalues(df_nomiss$Customer.Type, from=g, to=order)
+df_nomiss$dum_Customer <- as.integer(df_nomiss$dum_Customer)
+
+# "Business 0" "Eco 1"      "Eco Plus 2"
+g = sort(unique(df_nomiss$Class))
+order=c(2,0,1)
+# order=c(0:(length(g)-1))
+print(paste(g, order))
+df_nomiss$dum_Class <- mapvalues(df_nomiss$Class, from=g, to=order)
+df_nomiss$dum_Class <- as.integer(df_nomiss$dum_Class)
+
+# 
+g = sort(unique(df_nomiss$satisfaction))
+order=c(0:(length(g)-1))
+print(paste(g, order))
+df_nomiss$dum_satisfaction <- mapvalues(df_nomiss$satisfaction, from=g, to=order)
+df_nomiss$dum_satisfaction <- as.integer(df_nomiss$dum_satisfaction)
+```
+
+```{r}
+# remove original categorical data
+df<- df_nomiss[, -c(1,2,4,22)]
+```
+
+```{r}
+summary(df)
+```
+
+
+```{r}
+outliers <- boxplot(df$Departure.Delay.in.Minutes, plot=FALSE)$out
+```
+
+```{r}
+df_no_out<-df
+df_no_out<- df_no_out[-which(df_no_out$Departure.Delay.in.Minutes %in% outliers),]
+```
+
+```{r}
+outliers2 <- boxplot(df_no_out$Arrival.Delay.in.Minutes, plot=FALSE)$out
+```
+
+```{r}
+df_no_out<- df_no_out[-which(df_no_out$Arrival.Delay.in.Minutes %in% outliers2),]
+```
+
+
+```{r}
+colnames(df_no_out)
+```
+
+```{r}
+library(stats)
+library(psych)
+library("corrplot")
+
+visualize <- function(data, numcols) {
+  cor.plot(df[,numcols])
+  corr = cor(df[,-numcols], method='s')
+  corrplot(corr, method = "color",
+     type = "upper", order = "hclust", 
+     #addCoef.col = "black",
+     tl.col = "black")  
+}
+```
+
+```{r}
+numcols=c(1,2,17,18)
+visualize(df, numcols)
+```
+
+- correlation on servicing features (On.board.service, baggage handling, inflight.services); technology (online.boarding, inflight.wifi.service, Ease.of.online.booking); entertainment (Seat.comfort, inflight.entertainment, food.and.drink, Cleanliness)
+
+```{r}
+data0=df[df$dum_satisfaction==0,]
+visualize(data0, numcols)
+```
+
+
+```{r}
+data1=df[df$dum_satisfaction==1,]
+visualize(data1, numcols)
+```
+missing values count by column
+```{r}
+library(dlookr)
+diagnose(df)
+```
+
+
+Scale data (df with outliers)
+```{r}
+target_col=ncol(df)
+X = df[,-target_col]
+y = df[,target_col]
+
+#scale the data
+X_scale=as.data.frame(scale(X))
+cnames=colnames(X)
+scale_tbl=data.frame()
+# store the mean and std for each column for future use if needed
+for (i in c(1:21)) {
+  m = mean(X[,i])
+  s = sd(X[,i])
+  scale_tbl =rbind(scale_tbl, c(cnames[i],m,s))
+}
+
+colnames(scale_tbl) <- c("var.names","mean", "sdev")
+# scale_tbl
+```
+
+
+Scale data (df with no outliers)
+```{r}
+target_col=ncol(df)
+X_noout = df[,-target_col]
+
+#scale the data
+X_scale_noout=as.data.frame(scale(X_noout))
+cnames=colnames(X_noout)
+scale_tbl_noout=data.frame()
+# store the mean and std for each column for future use if needed
+for (i in c(1:21)) {
+  m = mean(X_noout[,i])
+  s = sd(X_noout[,i])
+  scale_tbl_noout =rbind(scale_tbl_noout, c(cnames[i],m,s))
+}
+
+colnames(scale_tbl_noout) <- c("var.names","mean", "sdev")
+# scale_tbl_noout
+```

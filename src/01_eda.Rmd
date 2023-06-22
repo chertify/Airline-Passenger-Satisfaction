@@ -1,0 +1,195 @@
+---
+title: "4840 project"
+author: "Project Team"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+### Load the library you want to use
+```{r}
+library(tidyverse)
+library(summarytools)
+library(dlookr)
+library(caret)
+library(dplyr)
+library(scales)
+theme_set(theme_grey())
+```
+
+
+```{r}
+colorshades=c("#5c71e8","#424180","#b1bff9","#7b8ce0",'cornflowerblue','deepskyblue2')
+```
+
+# 1. Read the data into R:
+```{r}
+temp <- read.csv("~/Documents/Data Science/Term 3/DANA 4840 - rebecca/project/data/train.csv")
+```
+
+
+```{r}
+head(temp)
+```
+
+
+```{r}
+library(dlookr)
+diagnose(temp)
+```
+
+
+```{r}
+colnames(temp)
+```
+#Structure of dataset
+```{r}
+str(temp)
+```
+
+# A1 Remove X and id as they are unique identifiers, and extract personal travel records
+```{r}
+raw_df<-temp[temp$Type.of.Travel=="Personal Travel",-c(1,2)]
+#drop type of travel
+raw_df<-raw_df[,-4]
+# View(raw_df)
+```
+
+# D1 - 32249 personal travel records, 25 variables. Assume records are not duplicated.
+
+```{r}
+summary(raw_df)
+```
+
+```{r}
+colnames(raw_df)
+```
+```{r}
+library(rlist)
+n_col = c("Age", "Flight.Distance", "Departure.Delay.in.Minutes", "Arrival.Delay.in.Minutes")
+n_col_idx = c(3,5,20,21)
+target =  c("satisfaction")
+c_col = list.remove(colnames(raw_df), n_col_idx)
+
+```
+
+```{r}
+c_col
+```
+
+
+# check missing data
+
+missing values count by column
+```{r}
+library(dlookr)
+diag=diagnose(raw_df)
+diag[which(diag$missing_count>0),]
+```
+
+
+```{r}
+library(Hmisc)
+# num_cols= unlist(lapply(raw_df, is.numeric))         # Identify numeric columns
+num_cols = n_col
+num_df1=raw_df[raw_df$satisfaction=="satisfied",num_cols]
+hist.data.frame(num_df1,na.big=TRUE)
+num_df2=raw_df[raw_df$satisfaction!="satisfied",num_cols]
+hist.data.frame(num_df2,na.big=TRUE)
+```
+
+```{r}
+# chr_cols= unlist(lapply(raw_df, is.character))         # Identify numeric columns
+chr_cols = c_col    # include categorical columns represented in numeric values
+chr_df=raw_df[,chr_cols]
+
+cnames = colnames(chr_df)
+for (i in c(1:length(cnames))) {
+  count<-table(chr_df[,i],chr_df$satisfaction)
+# barchart with added parameters
+  lg=as.character(sort(unique(chr_df[,i])))
+  barplot(count,
+  main = cnames[i],
+  xlab = "Customer Satisfaction",
+  # col = c("orange","blue","green"),
+  col = colorshades[1:length(lg)],
+  beside=TRUE
+  )
+  legend("topright",  lg,  fill = colorshades[1:length(lg)]  )
+}
+```
+
+# D1, from the histogram and barplot, we see that the data is imbalanced, and distribution of numerical features are not normal. 
+
+
+# Q2 120 missing data in arrival delay - 0 or max or median -> suggest to check satisfaction
+
+```{r}
+# get records with missing data
+miss_arr_delay = raw_df[is.na(raw_df$Arrival.Delay.in.Minutes),]
+nomiss_arr_delay = raw_df[!is.na(raw_df$Arrival.Delay.in.Minutes),]
+nrow(miss_arr_delay)
+freq(miss_arr_delay$satisfaction)
+freq(nomiss_arr_delay$satisfaction)
+```
+# D2 among 120 records with missing delay arrival information, there are both satisfied and netural/dissatisfed passengers. Ratio of satisfied pax is slightly higher than those with complete records.
+
+# A2 suggest to set missing delay arrival information to median of each target category.
+
+# Q3 How to handle outliers on departure and arrival delay?
+
+# D3 means are greater than 3Q value - data very skewed
+
+```{r}
+hist(raw_df$Departure.Delay.in.Minutes,col = c("blue"))
+hist(raw_df$Arrival.Delay.in.Minutes, col = c("orange"))
+```
+
+since min max range is about 12/13, we set IQR to 36/39, remove from data and plot again
+
+```{r}
+# subsetting dataset
+outl_departure = raw_df[raw_df$Departure.Delay.in.Minutes<= 36,]
+outl_arrival = raw_df[raw_df$Arrival.Delay.in.Minutes<= 39,]
+```
+
+
+```{r}
+hist(outl_departure$Departure.Delay.in.Minutes)
+hist(outl_arrival$Arrival.Delay.in.Minutes)
+```
+We can see the dist. are still very skewed because while most of the flights have no delay, those having delays can have wide range of values.
+
+# A3 - suggest to bin the values into - 4 bins?
+
+# Q4 - are zero rating value  missing values?
+
+```{r}
+(all_col<-colnames(raw_df))
+```
+
+```{r}
+# check percentage of records with ratings = 0 for each feature
+n=nrow(raw_df)
+score_col=all_col[6:19]
+score_col_impute = c()   # record the columns that may need to be imputed later
+for (col in score_col) {
+  pc = 100* (nrow(raw_df[raw_df[col]==0,]) / n)
+  med = median(raw_df[,col])
+  if (pc > 0) { 
+    score_col_impute <- c(score_col_impute, col)
+    }
+  print(paste(col, pc, med))
+}
+```
+# A4 - assuming zero means not applicable, suggest to impute the value to median of each target group.
+
+# Q5 - checking blank values
+```{r}
+factor_col = all_col[c(1,2,4,22)]
+for (col in factor_col) {
+  print(paste(col, unique(raw_df[col])))
+}
+```
+
+# A5 there is no blank values in categorical columns, but suggest to generate dummies for categorical data
+
+
